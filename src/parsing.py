@@ -7,7 +7,7 @@ class Prompt(BaseModel):
     prompt: str
 
     @model_validator(mode="after")
-    def check_prompt(self):
+    def check_prompt(self) -> "Prompt":
         if not self.prompt.strip():
             raise ValueError("invalid")
         return self
@@ -17,7 +17,7 @@ class Parameter(BaseModel):
     type: str
 
     @model_validator(mode="after")
-    def check_type(self):
+    def check_type(self) -> "Parameter":
         if not self.type.strip():
             raise ValueError("invalid")
         return self
@@ -27,7 +27,7 @@ class Returns(BaseModel):
     type: str
 
     @model_validator(mode="after")
-    def check_type(self):
+    def check_type(self) -> "Returns":
         if not self.type.strip():
             raise ValueError("invalid")
         return self
@@ -40,7 +40,7 @@ class Functions(BaseModel):
     returns: Returns
 
     @model_validator(mode="after")
-    def check_function(self):
+    def check_function(self) -> "Functions":
         if not self.name.strip():
             raise ValueError("invalid name")
 
@@ -50,7 +50,7 @@ class Functions(BaseModel):
         return self
 
 
-def main():
+def main() -> None:
     with open(
         "/goinfre/cramadan/project/data/input/function_calling_tests.json", "r"
     ) as file:
@@ -73,7 +73,7 @@ def main():
         i += 1
 
 
-def parsing_part():
+def parsing_part() -> None:
     try:
         main()
     except Exception as e:
