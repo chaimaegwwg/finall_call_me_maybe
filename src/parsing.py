@@ -1,5 +1,6 @@
 from pydantic import BaseModel, model_validator
 from typing import Dict
+import argparse
 import json
 import sys
 import re
@@ -52,7 +53,7 @@ class Functions(BaseModel):
         return self
 
 
-def main(arg) -> None:
+def main(arg: argparse.Namespace) -> None:
     with open(
         arg.input, "r"
     ) as file:
@@ -83,10 +84,9 @@ def main(arg) -> None:
         i += 1
 
 
-def parsing_part(arg) -> None:
+def parsing_part(arg: argparse.Namespace) -> None:
     try:
         main(arg)
     except Exception as e:
         print("Error:", e)
         sys.exit(0)
-

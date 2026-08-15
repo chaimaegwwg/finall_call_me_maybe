@@ -1,7 +1,8 @@
 import json
 import sys
+import argparse
 from .parsing import parsing_part
-from typing import Any
+from typing import Any, cast
 from .output import read_vocab, parser_args, write_output
 
 
@@ -13,12 +14,17 @@ except KeyboardInterrupt:
 
 
 class LLM:
-    def __init__(self, llm: Small_LLM_Model, vocab: dict[str, int],args) -> None:
+    def __init__(
+        self,
+        llm: Small_LLM_Model,
+        vocab: dict[str, int],
+        args: argparse.Namespace
+    ) -> None:
         with open(
             args.functions_definition,
             'r'
         ) as file:
-            self.functions = json.load(file)
+            self.functions = cast(list[dict[str, Any]], json.load(file))
             self.functions.append({
                 "name": "fn_unknown",
                 "description": (
@@ -30,7 +36,6 @@ class LLM:
                     "type": "null"
                 }
             })
-        # self.functions = json.dumps(self.functions, indent=2)
         self.llm = llm
         self.vocab = vocab
         self.fixed_tokens = {
@@ -59,7 +64,7 @@ class LLM:
         if parameter not in parameters:
             return None
 
-        return parameters[parameter]["type"]
+        return cast(str, parameters[parameter]["type"])
 
     def get_parameters(
         self,
@@ -67,7 +72,7 @@ class LLM:
     ) -> dict[str, Any] | None:
         for function in self.functions:
             if function["name"] == function_name:
-                return function["parameters"]
+                return cast(dict[str, Any], function["parameters"])
 
         return None
 
@@ -117,7 +122,7 @@ class LLM:
         self,
         inputs: list[int],
         new_token: list[int],
-        llm
+        llm: Small_LLM_Model
     ) -> tuple[list[int], list[int], list[int]]:
         name_of_func = []
         functions = self.all_functions()
@@ -184,9 +189,6 @@ class LLM:
                     remove_lst.append(func)
                     continue
                 lst_index.append(func[0])
-
-            # logits = llm.get_logits_from_input_ids(inputs)
-            # logits = torch.tensor(logits)
             logits = torch.tensor(self.llm.get_logits_from_input_ids(inputs))
             original_logits = logits.clone()
             logits[:] = float("-inf")
@@ -214,20 +216,17 @@ class LLM:
         inputs: list[int],
         new_token: list[int],
         llm: Small_LLM_Model,
-        parameter_type: str
+        parameter_type: str = "number"
     ) -> tuple[list[int], list[int]]:
-        number_tokens = []
+        number_tokens: list[int] = []
 
-        for _ in range(10):
-            # logits = llm.get_logits_from_input_ids(inputs)
-            # logits = torch.tensor(logits)
+        for _ in range(30):
             logits = torch.tensor(self.llm.get_logits_from_input_ids(inputs))
-
             predicted_tensor = torch.argmax(logits)
             token_id = int(predicted_tensor.item())
             token_text = llm.decode([token_id])
 
-            if "," in token_text or "}" in token_text:
+            if "," in token_text or "}" in token_text or '"' in token_text:
                 break
 
             number_tokens.append(token_id)
@@ -236,18 +235,19 @@ class LLM:
         number_text = llm.decode(number_tokens).strip()
 
         try:
-            if parameter_type == "float" or parameter_type == "number":
-                value = float(number_text)
+            if parameter_type == "integer":
+                val = str(int(float(number_text)))
             else:
-                value = int(float(number_text))
-            final_tokens = llm.encode(str(value)).tolist()[0]
-
-            new_token.extend(final_tokens)
-
-            return new_token, inputs
-
+                val = str(float(number_text))
         except ValueError:
-            return new_token, inputs
+            val = "0"
+
+        encoded_val = llm.encode(val).tolist()[0]
+        new_token.extend(encoded_val)
+        if not number_tokens:
+            inputs.extend(encoded_val)
+
+        return new_token, inputs
 
     def ft_string(
         self,
@@ -255,23 +255,26 @@ class LLM:
         new_token: list[int]
     ) -> tuple[list[int], list[int]]:
         for _ in range(30):
-            # logits = self.llm.get_logits_from_input_ids(inputs)
-            # logits = torch.tensor(logits)
             logits = torch.tensor(self.llm.get_logits_from_input_ids(inputs))
-
             predicted_tensor = torch.argmax(logits)
             token_id = int(predicted_tensor.item())
-
             token_text = self.llm.decode([token_id])
 
-            if '"' in token_text and "\n" in token_text:
-                new_token, inputs = self.ft_constrain('"', inputs, new_token)
-                break
-            new_token.append(token_id)
-            inputs.append(token_id)
-
             if '"' in token_text:
+                if '"' in token_text and "\n" in token_text:
+                    new_token, inputs = (
+                        self.ft_constrain('"', inputs, new_token))
+                    break
+                elif "\\" in token_text:
+                    new_token.append(token_id)
+                    inputs.append(token_id)
+                    continue
+                new_token.append(token_id)
+                inputs.append(token_id)
                 break
+            else:
+                new_token.append(token_id)
+                inputs.append(token_id)
         return new_token, inputs
 
     def generate_text(
@@ -359,21 +362,16 @@ class LLM:
 
                 used_parameters.append(parameters_t)
 
-                parameter_type = self.parameter_type_func(
-                    function_name, parameters_t)
-                if (
-                    parameter_type == "number"
-                    or parameter_type == "integer"
-                    or parameter_type == "float"
-                ):
-                    new_token, inputs = self.ft_numb_num(
-                        inputs, new_token, llm, parameter_type)
-
-                elif parameter_type == "string" or parameter_type == "boolean":
-                    new_token, inputs = self.ft_constrain(
-                        '"', inputs, new_token)
+                parameter_type = (
+                    self.parameter_type_func(function_name, parameters_t))
+                if parameter_type in ("number", "integer", "float"):
+                    new_token, inputs = (
+                        self.ft_numb_num(
+                            inputs, new_token, llm, parameter_type))
+                elif parameter_type in ("string", "boolean"):
+                    new_token, inputs = (
+                        self.ft_constrain('"', inputs, new_token))
                     new_token, inputs = self.ft_string(inputs, new_token)
-
                 else:
                     print("Unknown parameter:", parameters_t)
                     return None

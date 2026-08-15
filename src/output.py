@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 from pathlib import Path
 import argparse
 import json
@@ -18,10 +18,10 @@ def read_vocab(llm: Small_LLM_Model) -> dict[str, int]:
     except FileNotFoundError as e:
         print("Error:", e)
         sys.exit(0)
-    return vocab
+    return cast(dict[str, int], vocab)
 
 
-def write_output(output_text: list[Any], output_path: str) -> None:
+def write_output(output_text: list[Any], output_path: str | Path) -> None:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
