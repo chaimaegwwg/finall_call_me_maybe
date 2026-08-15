@@ -2,7 +2,6 @@ install:
 	uv sync
 
 run:
-	uv run python src/parsing.py
 	uv run python -m src
 
 debug:

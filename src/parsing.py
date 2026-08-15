@@ -1,6 +1,8 @@
 from pydantic import BaseModel, model_validator
 from typing import Dict
 import json
+import sys
+import re
 
 
 class Prompt(BaseModel):
@@ -50,9 +52,9 @@ class Functions(BaseModel):
         return self
 
 
-def main() -> None:
+def main(arg) -> None:
     with open(
-        "/goinfre/cramadan/project/data/input/function_calling_tests.json", "r"
+        arg.input, "r"
     ) as file:
         data = json.load(file)
     prompts = []
@@ -61,8 +63,16 @@ def main() -> None:
         prompt = Prompt.model_validate(data[i])
         prompts.append(prompt)
         i += 1
+    INT_max = 2147483647
+    INT_min = -2147483648
+    for p in prompts:
+        num = re.findall(r"-?\d+", p.prompt)
+        for k in num:
+            if int(k) > INT_max or int(k) < INT_min:
+                print(f"Error: the number {k}")
+                sys.exit(0)
     with open(
-        "/goinfre/cramadan/project/data/input/functions_definition.json", "r"
+        arg.functions_definition, "r"
     ) as file:
         data_function = json.load(file)
     functions = []
@@ -73,11 +83,10 @@ def main() -> None:
         i += 1
 
 
-def parsing_part() -> None:
+def parsing_part(arg) -> None:
     try:
-        main()
+        main(arg)
     except Exception as e:
         print("Error:", e)
+        sys.exit(0)
 
-
-parsing_part()

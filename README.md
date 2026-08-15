@@ -271,12 +271,12 @@ Example output:
 │   ├── input/
 │   │   ├── functions_definition.json
 │   │   └── function_calling_tests.json
-│   └── output/
-│       └── function_calling_results.json
 ├── llm_sdk/
-│   └── llm_sdk.py
+│   └── llm_sdk
+│         ├──__init__.py
 ├── src/
 │   └── ...
+├──Makefile
 └── README.md
 ```
 

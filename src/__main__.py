@@ -1,19 +1,36 @@
-from llm_sdk.llm_sdk import Small_LLM_Model
-import torch
 import json
-import argparse
 import sys
+from .parsing import parsing_part
 from typing import Any
-from pathlib import Path
+from .output import read_vocab, parser_args, write_output
+
+
+try:
+    from llm_sdk.llm_sdk import Small_LLM_Model
+    import torch
+except KeyboardInterrupt:
+    sys.exit(0)
 
 
 class LLM:
-    def __init__(self, llm: Small_LLM_Model, vocab: dict[str, int]) -> None:
+    def __init__(self, llm: Small_LLM_Model, vocab: dict[str, int],args) -> None:
         with open(
-            '/goinfre/cramadan/project/data/input/functions_definition.json',
+            args.functions_definition,
             'r'
         ) as file:
             self.functions = json.load(file)
+            self.functions.append({
+                "name": "fn_unknown",
+                "description": (
+                    "Select this function only if no available function "
+                    "matches the user's prompt."
+                ),
+                "parameters": {},
+                "returns": {
+                    "type": "null"
+                }
+            })
+        # self.functions = json.dumps(self.functions, indent=2)
         self.llm = llm
         self.vocab = vocab
         self.fixed_tokens = {
@@ -27,7 +44,6 @@ class LLM:
 
         for function in self.functions:
             lst.append(function["name"])
-        # lst.append("unknown")
         return lst
 
     def parameter_type_func(
@@ -61,15 +77,15 @@ class LLM:
         inputs: list[int],
         new_token: list[int]
     ) -> tuple[list[int], list[int]]:
-        logits = self.llm.get_logits_from_input_ids(inputs)
-        logits = torch.tensor(logits)
+        logits = torch.tensor(self.llm.get_logits_from_input_ids(inputs))
         wanted = self.llm.encode(parameter).tolist()[0][0]
         original_logits = logits.clone()
         logits[:] = float("-inf")
         logits[wanted] = original_logits[wanted]
         predicted_tensor = torch.argmax(logits)
-        new_token.append(predicted_tensor.item())
-        inputs.append(predicted_tensor.item())
+        pred_id = int(predicted_tensor.item())
+        new_token.append(pred_id)
+        inputs.append(pred_id)
         return new_token, inputs
 
     def ft_constrain(
@@ -79,7 +95,6 @@ class LLM:
         new_token: list[int]
     ) -> tuple[list[int], list[int]]:
         token = self.vocab[parameter]
-        # print("here the debug",token)
         new_token.append(token)
         inputs.append(token)
         return new_token, inputs
@@ -102,7 +117,7 @@ class LLM:
         self,
         inputs: list[int],
         new_token: list[int],
-        llm: Small_LLM_Model
+        llm
     ) -> tuple[list[int], list[int], list[int]]:
         name_of_func = []
         functions = self.all_functions()
@@ -114,20 +129,18 @@ class LLM:
             lst_index = []
             if all(len(x) == 0 for x in lst_gath_func):
                 break
-            # if len(lst_gath_func) == 1 and len(lst_gath_func[0]) == 0:
-            #     break
             for func in lst_gath_func:
                 if len(func) <= 0:
                     remove_lst.append(func)
                     continue
                 lst_index.append(func[0])
 
-            logits = llm.get_logits_from_input_ids(inputs)
-            logits = torch.tensor(logits)
+            logits = torch.tensor(self.llm.get_logits_from_input_ids(inputs))
             original_logits = logits.clone()
             logits[:] = float("-inf")
             logits[lst_index] = original_logits[lst_index]
             predicted_tensor = torch.argmax(logits)
+
             for fun in lst_gath_func:
                 predicted = predicted_tensor.item()
                 if len(fun) == 0 or 0 >= len(fun) or fun[0] != predicted:
@@ -139,9 +152,10 @@ class LLM:
                 if fun not in lst_gath_func:
                     continue
                 lst_gath_func.remove(fun)
-            name_of_func.append(predicted_tensor.item())
-            new_token.append(predicted_tensor.item())
-            inputs.append(predicted_tensor.item())
+            pred_id = int(predicted_tensor.item())
+            name_of_func.append(pred_id)
+            new_token.append(pred_id)
+            inputs.append(pred_id)
         return new_token, inputs, name_of_func
 
     def ft_constrain_parameters(
@@ -150,11 +164,11 @@ class LLM:
         new_token: list[int],
         name_of_func: list[int],
         llm: Small_LLM_Model
-    ) -> tuple[list[int], list[int], list[int]] | None:
+    ) -> tuple[list[int], list[int], list[int]]:
         name = llm.decode(name_of_func).strip()
         parameters = self.get_parameters(name)
         if parameters is None:
-            return
+            return new_token, inputs, []
         name_of_parameter = []
         ids_lst = []
         for parameter in parameters:
@@ -165,16 +179,15 @@ class LLM:
             lst_index = []
             if all(len(x) == 0 for x in ids_lst):
                 break
-            # if len(ids_lst) == 1 and len(ids_lst[0]) == 0:
-            #     break
             for func in ids_lst:
                 if len(func) <= 0:
                     remove_lst.append(func)
                     continue
                 lst_index.append(func[0])
 
-            logits = llm.get_logits_from_input_ids(inputs)
-            logits = torch.tensor(logits)
+            # logits = llm.get_logits_from_input_ids(inputs)
+            # logits = torch.tensor(logits)
+            logits = torch.tensor(self.llm.get_logits_from_input_ids(inputs))
             original_logits = logits.clone()
             logits[:] = float("-inf")
             logits[lst_index] = original_logits[lst_index]
@@ -190,9 +203,10 @@ class LLM:
                 if fun not in ids_lst:
                     continue
                 ids_lst.remove(fun)
-            name_of_parameter.append(predicted_tensor.item())
-            new_token.append(predicted_tensor.item())
-            inputs.append(predicted_tensor.item())
+            pred_id = int(predicted_tensor.item())
+            name_of_parameter.append(pred_id)
+            new_token.append(pred_id)
+            inputs.append(pred_id)
         return new_token, inputs, name_of_parameter
 
     def ft_numb_num(
@@ -205,14 +219,13 @@ class LLM:
         number_tokens = []
 
         for _ in range(10):
-            logits = llm.get_logits_from_input_ids(inputs)
-            logits = torch.tensor(logits)
+            # logits = llm.get_logits_from_input_ids(inputs)
+            # logits = torch.tensor(logits)
+            logits = torch.tensor(self.llm.get_logits_from_input_ids(inputs))
 
             predicted_tensor = torch.argmax(logits)
-            token_id = predicted_tensor.item()
+            token_id = int(predicted_tensor.item())
             token_text = llm.decode([token_id])
-
-            print("NUMBER TOKEN:", repr(token_text))
 
             if "," in token_text or "}" in token_text:
                 break
@@ -227,9 +240,6 @@ class LLM:
                 value = float(number_text)
             else:
                 value = int(float(number_text))
-
-            print("NUMBER:", number_text)
-            print("VALUE:", value)
             final_tokens = llm.encode(str(value)).tolist()[0]
 
             new_token.extend(final_tokens)
@@ -245,11 +255,12 @@ class LLM:
         new_token: list[int]
     ) -> tuple[list[int], list[int]]:
         for _ in range(30):
-            logits = self.llm.get_logits_from_input_ids(inputs)
-            logits = torch.tensor(logits)
+            # logits = self.llm.get_logits_from_input_ids(inputs)
+            # logits = torch.tensor(logits)
+            logits = torch.tensor(self.llm.get_logits_from_input_ids(inputs))
 
             predicted_tensor = torch.argmax(logits)
-            token_id = predicted_tensor.item()
+            token_id = int(predicted_tensor.item())
 
             token_text = self.llm.decode([token_id])
 
@@ -269,10 +280,10 @@ class LLM:
         llm: Small_LLM_Model,
         user_request: str
     ) -> str | None:
-        used_parameters = []
-        inputs = llm.encode(prompt)
-        inputs = inputs.tolist()[0]
-        new_token = []
+        used_parameters: list[str] = []
+        encoded_inputs = llm.encode(prompt)
+        inputs: list[int] = encoded_inputs.tolist()[0]
+        new_token: list[int] = []
         start = 0
         for _ in range(60):
             if start == 0:
@@ -321,7 +332,18 @@ class LLM:
                 start += 1
             elif start == 5:
                 new_token, inputs = self.ft_constrain("{", inputs, new_token)
+
                 function_name = llm.decode(name_of_func).strip()
+                parameters = self.get_parameters(function_name)
+
+                if not parameters:
+                    new_token, inputs = self.ft_constrain(
+                        "}", inputs, new_token)
+                    new_token, inputs = self.ft_constrain(
+                        "}", inputs, new_token)
+                    start = 11
+                    continue
+
                 start += 1
             elif start == 6:
                 new_token, inputs = self.ft_constrain('"', inputs, new_token)
@@ -361,8 +383,10 @@ class LLM:
             elif start == 8:
                 function_name = llm.decode(name_of_func).strip()
                 parameters = self.get_parameters(function_name)
-
-                if len(used_parameters) >= len(parameters):
+                if (
+                    parameters is None
+                    or len(used_parameters) >= len(parameters)
+                ):
                     new_token, inputs = self.ft_constrain(
                         "}", inputs, new_token)
                     new_token, inputs = self.ft_constrain(
@@ -379,10 +403,10 @@ class LLM:
                 logits[brace] = original_logits[brace]
                 logits[comma] = original_logits[comma]
                 predicted_tensor = torch.argmax(logits)
-                token = llm.decode([predicted_tensor.item()])
+                token_id = int(predicted_tensor.item())
+                token = llm.decode([token_id])
                 start += 1
             elif start == 9:
-                # print("it reached here the state 9")
                 nw = llm.decode(new_token)
                 if token == ",":
                     new_token, inputs = self.ft_constrain(
@@ -402,71 +426,22 @@ class LLM:
             else:
                 break
         answer = llm.decode(new_token)
-        print(repr(answer))
         return answer
-
-
-def read_vocab(llm: Small_LLM_Model) -> dict[str, int]:
-    path = llm.get_path_to_vocab_file()
-    try:
-        with open(path, "r") as file:
-            vocab = json.load(file)
-    except FileNotFoundError as e:
-        print("Error:", e)
-        sys.exit(0)
-    return vocab
-
-
-def write_output(output_text: list[Any]) -> None:
-    output_path = Path("data/answers.json")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        with open(output_path, "w", encoding="utf-8") as file:
-            json.dump(output_text, file, indent=4)
-
-    except Exception as error:
-        print(f"Error writing output: {error}")
-
-
-def parser_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--functions_definition",
-        default="data/input/functions_definition.json"
-    )
-
-    parser.add_argument(
-        "--input",
-        default="data/input/function_calling_tests.json"
-    )
-
-    parser.add_argument(
-        "--output",
-        default="data/output/function_calling_results.json"
-    )
-
-    args = parser.parse_args()
-    return args
 
 
 def maaain_t() -> None:
     args = parser_args()
-
+    parsing_part(args)
     answer_lst = []
     llm = Small_LLM_Model()
     vocab = read_vocab(llm)
-    S = LLM(llm, vocab)
-
+    S = LLM(llm, vocab, args)
     with open(args.input, "r", encoding="utf-8") as file:
         content = file.read()
         prompt = json.loads(content)
-
     with open(args.functions_definition, "r", encoding="utf-8") as file:
-        functions_text = file.read()
-    for i in range(11):
-        print("--------------->the promopt", i)
+        functions_text = json.load(file)
+    for i in range(len(prompt)):
         user_request = prompt[i]["prompt"]
         answer = S.generate_text(f"""You are a function-calling assistant.
 
@@ -492,15 +467,16 @@ def maaain_t() -> None:
         ----------------------------------------
 
         {{
-        "function": "<function_name>",
-        "arguments": {{
+        "prompt": "{user_request}",
+        "name": "<function_name>",
+        "parameters": {{
             ...
         }}
         }}
 
         Do not explain your reasoning.
         Do not return Markdown.
-        If no function matches, return null.""", llm, user_request)
+        If no function matches, return "ft_unknown".""", llm, user_request)
         if answer is not None:
             try:
                 answer_lst.append(json.loads(answer))
@@ -508,14 +484,13 @@ def maaain_t() -> None:
                 print("INVALID JSON:")
                 print(repr(answer))
                 print("ERROR:", e)
-    write_output(answer_lst)
+    write_output(answer_lst, args.output)
 
 
 def main_logic() -> None:
     try:
         maaain_t()
-    except KeyboardInterrupt as e:
-        print("Error:", e)
+    except KeyboardInterrupt:
         sys.exit(0)
 
 
